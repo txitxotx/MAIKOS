@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/morningstar.js": { "maxDuration": 30 },
+    "api/yahoo.js":       { "maxDuration": 20 },
+    "api/analyze.js":     { "maxDuration": 60 }
+  }
+}
