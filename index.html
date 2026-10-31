@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Portfolio · Dashboard</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+// Si cdnjs no responde (bloqueado, caido, sin red), intentamos jsdelivr.
+// Sin esto, un fallo de CDN tumbaba TODA la aplicacion.
+if (typeof Chart === 'undefined') {
+  document.write('<scr' + 'ipt src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></scr' + 'ipt>');
+}
+</script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&family=Bebas+Neue&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#0a0c0f;--s1:#111419;--s2:#181c23;--s3:#1e2430;--bd:#1e2430;
@@ -1465,6 +1472,66 @@ body.privacy #trPosTable{
 <script>
 'use strict';
 
+// ══════════════════════════════════════════════════════════
+//  SELLO DE BUILD + CAPTURA DE ERRORES + DIAGNOSTICO
+//  Va al PRINCIPIO a proposito: si algo mas abajo falla,
+//  diag() y el banner de error siguen estando disponibles.
+//  En la consola:  diag()
+// ══════════════════════════════════════════════════════════
+const BUILD_ID = '2026-10-31-nanfix-3';
+console.log('%c[BUILD] ' + BUILD_ID, 'background:#00e5a0;color:#000;padding:2px 7px;border-radius:3px;font-weight:bold');
+
+// Banner visible ante cualquier error fatal: nunca mas una pagina muerta en silencio.
+window.addEventListener('error', function(ev){
+  try{
+    let d = document.getElementById('fatalBanner');
+    if(!d){
+      d = document.createElement('div');
+      d.id = 'fatalBanner';
+      d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#ff4757;color:#fff;'
+        + 'font:600 12px/1.5 system-ui,sans-serif;padding:10px 14px;white-space:pre-wrap;'
+        + 'box-shadow:0 2px 14px rgba(0,0,0,.5);max-height:38vh;overflow:auto';
+      (document.body || document.documentElement).appendChild(d);
+    }
+    d.textContent += '[ERROR] ' + (ev.message || 'error') + '\n'
+      + '   ' + (ev.filename || '?') + ' linea ' + (ev.lineno || '?') + '\n'
+      + '   BUILD ' + BUILD_ID + '\n';
+  }catch(e){}
+});
+
+window.diag = function(){
+  console.log('%c[BUILD] ' + BUILD_ID, 'background:#00e5a0;color:#000;padding:2px 7px;border-radius:3px;font-weight:bold');
+  console.log('Chart.js cargado:', typeof Chart !== 'undefined');
+  if (typeof ASSETS === 'undefined' || typeof S === 'undefined') {
+    console.log('%cEl script no llego a inicializar: ASSETS o S no existen. Mira el banner rojo o los errores de arriba.', 'color:#ff4757;font-weight:bold');
+    return null;
+  }
+  const rows = ASSETS.map(function(a){
+    const pd  = S.prices[a.id] || {};
+    const nav = Number.isFinite(pd.nav) ? pd.nav : a.costPrice;
+    const valorCrudo = a.titles * nav;
+    const probs = [];
+    if (!Number.isFinite(a.titles))    probs.push('titles');
+    if (!Number.isFinite(a.costPrice)) probs.push('costPrice');
+    if (!Number.isFinite(a.costeReal)) probs.push('costeReal');
+    if (!Number.isFinite(valorCrudo))  probs.push('valor=NaN');
+    return { id:a.id, cat:a.cat, src:a.src, ref:a.ticker || a.isin,
+             titles:a.titles, costPrice:a.costPrice, costeReal:a.costeReal,
+             navAPI:pd.nav, precioOK:!!pd.ok, valorCrudo:valorCrudo,
+             problema: probs.length ? probs.join(' + ') : 'ok' };
+  });
+  console.table(rows);
+  const bad = rows.filter(function(r){ return r.problema !== 'ok'; });
+  if (bad.length) console.log('%cACTIVOS CON DATOS INVALIDOS: ' + bad.map(function(r){return r.id+' ['+r.problema+']';}).join('  |  '), 'color:#ff4757;font-weight:bold');
+  else            console.log('%cNingun activo con datos invalidos', 'color:#00e5a0;font-weight:bold');
+  const sin = rows.filter(function(r){ return !r.precioOK; });
+  if (sin.length) console.log('Sin precio de API (usan costPrice): ' + sin.map(function(r){return r.id;}).join(', '));
+  console.log('TOTALES  tv=', S.tv, ' tc=', S.tc, ' tp=', S.tp, ' tpp=', S.tpp);
+  console.log('ASSETS=' + ASSETS.length + '  AC=' + ASSETS.filter(function(a){return a.cat==='AC';}).length
+            + '  TR_TRADES=' + (typeof TR_TRADES !== 'undefined' ? TR_TRADES.length : 'n/d'));
+  return bad;
+};
+
 // ── CONFIGURACIÓN GLOBAL ──────────────────────────────────────────────────
 // Tasa libre de riesgo anualizada (Rf) — actualizar según BCE / letras Tesoro
 // Afecta a: Sharpe, Sortino de todos los activos y de la cartera
@@ -2020,12 +2087,14 @@ const CATS=['RF','RV','CR','EP','AC'];
 const CHS={};
 
 function mkC(id,cfg){
+  if(typeof Chart==='undefined')return null;   // sin libreria no hay grafico, pero la app sigue
   const el=document.getElementById(id);if(!el)return null;
   if(CHS[id]){try{CHS[id].destroy();}catch(e){}delete CHS[id];}
   cfg.options=cfg.options||{};
   cfg.options.responsive=true;
   cfg.options.maintainAspectRatio=false;
-  CHS[id]=new Chart(el,cfg);return CHS[id];
+  try{ CHS[id]=new Chart(el,cfg); }catch(e){ console.warn('[grafico '+id+']',e.message); return null; }
+  return CHS[id];
 }
 
 // ══════════════════════════════════════════════════════════
@@ -3597,7 +3666,15 @@ function actTf(containerId,btn){
   if(btn)btn.classList.add('active');
 }
 
-Chart.defaults.color='#6b7a8d';Chart.defaults.font.family='DM Mono, monospace';
+// Blindado: si Chart.js no cargo, esta linea lanzaba ReferenceError en el nivel
+// superior del script y MATABA todo lo que venia despues (INIT incluido), con lo
+// que la pagina se quedaba vacia y sin un solo activo.
+if (typeof Chart !== 'undefined') {
+  Chart.defaults.color='#6b7a8d';
+  Chart.defaults.font.family='DM Mono, monospace';
+} else {
+  console.warn('[Chart.js] no se ha cargado: la cartera funciona, los graficos no se dibujaran.');
+}
 
 
 // ══════════════════════════════════════════════════════════
@@ -5205,40 +5282,6 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAssetMo
 document.getElementById('assetModal').addEventListener('click', e => {
   if (e.target === document.getElementById('assetModal')) closeAssetModal();
 });
-
-// ══════════════════════════════════════════════════════════
-//  SELLO DE BUILD + DIAGNOSTICO
-//  En la consola:  diag()
-// ══════════════════════════════════════════════════════════
-const BUILD_ID = '2026-10-31-nanfix-2';
-console.log('%c[BUILD] ' + BUILD_ID, 'background:#00e5a0;color:#000;padding:2px 7px;border-radius:3px;font-weight:bold');
-
-window.diag = function(){
-  console.log('%c[BUILD] ' + BUILD_ID, 'background:#00e5a0;color:#000;padding:2px 7px;border-radius:3px;font-weight:bold');
-  const rows = ASSETS.map(a => {
-    const pd  = S.prices[a.id] || {};
-    const nav = Number.isFinite(pd.nav) ? pd.nav : a.costPrice;
-    const valorCrudo = a.titles * nav;              // sin blindaje, para ver el NaN real
-    const probs = [];
-    if (!Number.isFinite(a.titles))    probs.push('titles');
-    if (!Number.isFinite(a.costPrice)) probs.push('costPrice');
-    if (!Number.isFinite(a.costeReal)) probs.push('costeReal');
-    if (!Number.isFinite(valorCrudo))  probs.push('valor=NaN');
-    return { id:a.id, cat:a.cat, src:a.src, ticker:a.ticker || a.isin,
-             titles:a.titles, costPrice:a.costPrice, costeReal:a.costeReal,
-             navAPI:pd.nav, precioOK:!!pd.ok, valorCrudo,
-             problema: probs.length ? probs.join(' + ') : 'ok' };
-  });
-  console.table(rows);
-  const bad = rows.filter(r => r.problema !== 'ok');
-  if (bad.length) console.log('%cACTIVOS CON DATOS INVALIDOS: ' + bad.map(r => r.id + ' [' + r.problema + ']').join('  |  '), 'color:#ff4757;font-weight:bold');
-  else            console.log('%cNingun activo con datos invalidos', 'color:#00e5a0;font-weight:bold');
-  const sinPrecio = rows.filter(r => !r.precioOK);
-  if (sinPrecio.length) console.log('Sin precio de API (usan costPrice): ' + sinPrecio.map(r => r.id).join(', '));
-  console.log('TOTALES  tv=', S.tv, ' tc=', S.tc, ' tp=', S.tp, ' tpp=', S.tpp);
-  console.log('ASSETS=' + ASSETS.length + '  AC=' + ASSETS.filter(a=>a.cat==='AC').length + '  TR_TRADES=' + (typeof TR_TRADES!=='undefined'?TR_TRADES.length:'n/d'));
-  return bad;
-};
 
 // INIT
 mgLoad_storage();
