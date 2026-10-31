@@ -2080,21 +2080,18 @@ async function loadFund(a){
 
 async function loadStocks(){
   const stocks=ASSETS.filter(a=>a.src==='yf'&&a.ticker);if(!stocks.length)return;
-  // Yahoo Finance vía proxy CORS público (allorigins)
+  // Precio via NUESTRA funcion serverless /api/yahoo (action=chart).
+  // Antes iba por el proxy publico allorigins.win: gratuito, sin SLA y caido
+  // a menudo -> el precio no llegaba y la accion se quedaba sin cotizacion.
   await Promise.allSettled(stocks.map(async a=>{
     try{
-      const url=`https://query1.finance.yahoo.com/v8/finance/chart/${a.ticker}?interval=1d&range=2d`;
-      const proxy=`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-      const r=await fetch(proxy);if(!r.ok)throw new Error(r.status);
-      const outer=await r.json();
-      const d=JSON.parse(outer.contents);
-      const q=d?.chart?.result?.[0];
-      if(!q)throw new Error('no result');
-      const closes=q.indicators?.quote?.[0]?.close||[];
-      const nav=closes[closes.length-1];
-      const prev=closes.length>1?closes[closes.length-2]:nav;
-      const d1=prev>0?((nav-prev)/prev)*100:0;
-      if(nav)S.prices[a.id]={nav,d1,ok:true};
+      const r=await fetch(`/api/yahoo?ticker=${encodeURIComponent(a.ticker)}&action=chart`);
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      const d=await r.json();
+      const nav=d.price, d1=d.d1;
+      if(Number.isFinite(nav)&&nav>0){
+        S.prices[a.id]={nav,d1:Number.isFinite(d1)?d1:0,ok:true};
+      } else throw new Error('precio invalido');
     }catch(e){console.warn('[YF '+a.ticker+']',e.message);}
   }));
 }
@@ -3586,7 +3583,7 @@ function setStatus(type,txt){document.getElementById('sDot').className='sdot '+(
 function sk(id,v){const el=document.getElementById(id);if(el)el.textContent=v;}
 function f(n,dec=0){if(n==null||isNaN(n))return'—';return n.toLocaleString('es-ES',{style:'currency',currency:'EUR',maximumFractionDigits:dec});}
 function fp(n){if(n==null||isNaN(n))return'—';if(n<.001)return n.toFixed(6)+'€';if(n<1)return n.toFixed(4)+'€';return n.toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:4})+'€';}
-function pp(n){return(n>=0?'+':'')+n.toFixed(2)+'%';}
+function pp(n){if(n==null||!Number.isFinite(n))return'—';return(n>=0?'+':'')+n.toFixed(2)+'%';}
 function thin(arr,max=400){if(arr.length<=max)return arr;const step=Math.ceil(arr.length/max);return arr.filter((_,i)=>i%step===0||i===arr.length-1);}
 function applyRange(dates,range){
   if(range==='all')return{d:dates};
@@ -5208,6 +5205,40 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAssetMo
 document.getElementById('assetModal').addEventListener('click', e => {
   if (e.target === document.getElementById('assetModal')) closeAssetModal();
 });
+
+// ══════════════════════════════════════════════════════════
+//  SELLO DE BUILD + DIAGNOSTICO
+//  En la consola:  diag()
+// ══════════════════════════════════════════════════════════
+const BUILD_ID = '2026-10-31-nanfix-2';
+console.log('%c[BUILD] ' + BUILD_ID, 'background:#00e5a0;color:#000;padding:2px 7px;border-radius:3px;font-weight:bold');
+
+window.diag = function(){
+  console.log('%c[BUILD] ' + BUILD_ID, 'background:#00e5a0;color:#000;padding:2px 7px;border-radius:3px;font-weight:bold');
+  const rows = ASSETS.map(a => {
+    const pd  = S.prices[a.id] || {};
+    const nav = Number.isFinite(pd.nav) ? pd.nav : a.costPrice;
+    const valorCrudo = a.titles * nav;              // sin blindaje, para ver el NaN real
+    const probs = [];
+    if (!Number.isFinite(a.titles))    probs.push('titles');
+    if (!Number.isFinite(a.costPrice)) probs.push('costPrice');
+    if (!Number.isFinite(a.costeReal)) probs.push('costeReal');
+    if (!Number.isFinite(valorCrudo))  probs.push('valor=NaN');
+    return { id:a.id, cat:a.cat, src:a.src, ticker:a.ticker || a.isin,
+             titles:a.titles, costPrice:a.costPrice, costeReal:a.costeReal,
+             navAPI:pd.nav, precioOK:!!pd.ok, valorCrudo,
+             problema: probs.length ? probs.join(' + ') : 'ok' };
+  });
+  console.table(rows);
+  const bad = rows.filter(r => r.problema !== 'ok');
+  if (bad.length) console.log('%cACTIVOS CON DATOS INVALIDOS: ' + bad.map(r => r.id + ' [' + r.problema + ']').join('  |  '), 'color:#ff4757;font-weight:bold');
+  else            console.log('%cNingun activo con datos invalidos', 'color:#00e5a0;font-weight:bold');
+  const sinPrecio = rows.filter(r => !r.precioOK);
+  if (sinPrecio.length) console.log('Sin precio de API (usan costPrice): ' + sinPrecio.map(r => r.id).join(', '));
+  console.log('TOTALES  tv=', S.tv, ' tc=', S.tc, ' tp=', S.tp, ' tpp=', S.tpp);
+  console.log('ASSETS=' + ASSETS.length + '  AC=' + ASSETS.filter(a=>a.cat==='AC').length + '  TR_TRADES=' + (typeof TR_TRADES!=='undefined'?TR_TRADES.length:'n/d'));
+  return bad;
+};
 
 // INIT
 mgLoad_storage();
